@@ -50,6 +50,12 @@
             #details-container { display: block !important; }
             section { margin-bottom: 2rem; page-break-inside: avoid; }
         }
+
+        /* Custom Modal for Archive */
+        .modal-overlay {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(4px);
+        }
     </style>
 </head>
 <body class="antialiased text-slate-800">
@@ -144,8 +150,9 @@
                 </div>
             </div>
 
-            <!-- SIMULATION PANEL -->
-            <div class="lg:col-span-4 no-print">
+            <!-- SIMULATION & ARCHIVE PANEL -->
+            <div class="lg:col-span-4 no-print space-y-6">
+                <!-- PARAMETER PANEL -->
                 <div class="bg-white p-6 md:p-8 rounded-3xl shadow-xl border border-slate-100">
                     <h3 class="text-lg font-extrabold mb-6 flex items-center">
                         <i class="fas fa-sliders-h mr-3 text-blue-600"></i>Parameter Panen
@@ -184,9 +191,39 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- ARCHIVE PANEL -->
+                <div class="bg-slate-900 p-6 md:p-8 rounded-3xl shadow-xl text-white">
+                    <h3 class="text-lg font-extrabold mb-4 flex items-center">
+                        <i class="fas fa-archive mr-3 text-blue-400"></i>Arsip RAB
+                    </h3>
+                    <p class="text-xs text-slate-400 mb-6">Simpan draf anggaran saat ini agar tidak hilang.</p>
+                    
+                    <button onclick="saveArchive()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-2xl font-bold text-sm transition shadow-lg shadow-blue-900/20 mb-6">
+                        <i class="fas fa-plus-circle mr-2"></i>Buat Arsip Baru
+                    </button>
+
+                    <div id="archive-list" class="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scroll">
+                        <!-- Archive items will appear here -->
+                        <div class="text-center py-4 text-slate-500 text-xs italic">Belum ada arsip tersimpan</div>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
+
+    <!-- Custom Popup for Archive Name -->
+    <div id="archive-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center px-4 modal-overlay">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+            <h4 class="font-black text-slate-900 mb-2">Simpan Arsip</h4>
+            <p class="text-xs text-slate-500 mb-4">Beri nama untuk rincian data ini.</p>
+            <input type="text" id="archive-name-input" placeholder="Contoh: Panen Desember 2024" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl mb-4 font-bold outline-none focus:border-blue-500">
+            <div class="flex gap-2">
+                <button onclick="closeArchiveModal()" class="flex-1 py-3 text-sm font-bold text-slate-500 bg-slate-100 rounded-2xl hover:bg-slate-200">Batal</button>
+                <button onclick="confirmSaveArchive()" class="flex-1 py-3 text-sm font-bold text-white bg-blue-600 rounded-2xl hover:bg-blue-700">Simpan</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const INITIAL_STATE = {
@@ -229,11 +266,13 @@
         let activeFish = localStorage.getItem('activeFish') || 'lele';
         let currentSection = localStorage.getItem('activeSection') || null;
         let appData = JSON.parse(localStorage.getItem('fishRABData')) || JSON.parse(JSON.stringify(INITIAL_STATE));
+        let archives = JSON.parse(localStorage.getItem('fishRABArchives')) || [];
 
         function formatRupiah(num) {
             return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
         }
 
+        // --- Logo Functions ---
         function handleLogoUpload(input) {
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
@@ -252,13 +291,14 @@
             document.getElementById('logo-placeholder').classList.add('hidden');
         }
 
+        // --- Core Application Functions ---
         function switchFish(type) {
             activeFish = type;
             localStorage.setItem('activeFish', type);
             
             const isLele = type === 'lele';
-            document.getElementById('tab-lele').className = `px-6 py-2 rounded-lg text-sm font-bold transition-all ${isLele ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`;
-            document.getElementById('tab-nila').className = `px-6 py-2 rounded-lg text-sm font-bold transition-all ${!isLele ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`;
+            document.getElementById('tab-lele').className = `flex-1 sm:flex-none px-6 py-2 rounded-lg text-sm font-bold transition-all ${isLele ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`;
+            document.getElementById('tab-nila').className = `flex-1 sm:flex-none px-6 py-2 rounded-lg text-sm font-bold transition-all ${!isLele ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-white'}`;
             
             document.getElementById('fish-badge').innerText = `Budidaya ${type}`;
             document.getElementById('fish-badge').className = `inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-2 shadow-sm ${isLele ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`;
@@ -277,14 +317,14 @@
                 vol: 1,
                 harga: 0
             });
-            localStorage.setItem('fishRABData', JSON.stringify(appData));
+            saveToLocalStorage();
             showSection(section);
             updateStats();
         }
 
         function removeRow(section, id) {
             appData[activeFish][section] = appData[activeFish][section].filter(item => item.id !== id);
-            localStorage.setItem('fishRABData', JSON.stringify(appData));
+            saveToLocalStorage();
             showSection(section);
             updateStats();
         }
@@ -375,18 +415,16 @@
                 if(field === 'nama') item[field] = value;
                 else item[field] = parseFloat(value) || 0;
                 
-                // Update local row subtotal immediately
                 const sub = document.getElementById(`sub-${id}`);
                 if(sub) sub.innerText = formatRupiah(item.vol * item.harga);
                 
-                // Update specific table footer total immediately
                 const currentData = appData[activeFish][section];
                 const totalKategori = currentData.reduce((acc, curr) => acc + (curr.vol * curr.harga), 0);
                 const footerTotal = document.getElementById('table-footer-total');
                 if(footerTotal) footerTotal.innerText = formatRupiah(totalKategori);
 
                 updateStats();
-                localStorage.setItem('fishRABData', JSON.stringify(appData));
+                saveToLocalStorage();
             }
         }
 
@@ -402,7 +440,6 @@
             const srVal = document.getElementById('range-sr').value;
             const sr = parseFloat(srVal) / 100;
             
-            // Safety check for benih (assuming first row is always benih for simple simulation)
             const benih = data.operasional[0] ? data.operasional[0].vol : 0;
             const hargaJual = parseFloat(document.getElementById('input-harga-jual').value) || 0;
             
@@ -423,22 +460,104 @@
             appData[activeFish].hargaJual = hargaJual;
         }
 
-        function resetData() {
-            if(confirm('Reset semua data budidaya ini ke awal? Semua tambahan baris akan hilang.')) {
-                appData[activeFish] = JSON.parse(JSON.stringify(INITIAL_STATE[activeFish]));
-                localStorage.setItem('fishRABData', JSON.stringify(appData));
+        // --- Archive Functions ---
+        function saveArchive() {
+            document.getElementById('archive-modal').classList.remove('hidden');
+            document.getElementById('archive-name-input').focus();
+        }
+
+        function closeArchiveModal() {
+            document.getElementById('archive-modal').classList.add('hidden');
+            document.getElementById('archive-name-input').value = '';
+        }
+
+        function confirmSaveArchive() {
+            const name = document.getElementById('archive-name-input').value.trim();
+            if (!name) {
+                alert('Tolong masukkan nama arsip.');
+                return;
+            }
+
+            const newArchive = {
+                id: Date.now(),
+                name: name,
+                fish: activeFish,
+                data: JSON.parse(JSON.stringify(appData[activeFish])),
+                timestamp: new Date().toLocaleString('id-ID')
+            };
+
+            archives.unshift(newArchive);
+            localStorage.setItem('fishRABArchives', JSON.stringify(archives));
+            
+            renderArchives();
+            closeArchiveModal();
+        }
+
+        function renderArchives() {
+            const container = document.getElementById('archive-list');
+            if (archives.length === 0) {
+                container.innerHTML = `<div class="text-center py-4 text-slate-500 text-xs italic">Belum ada arsip tersimpan</div>`;
+                return;
+            }
+
+            container.innerHTML = archives.map(arc => `
+                <div class="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex flex-col gap-3 group">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="text-xs font-black text-slate-200 uppercase">${arc.name}</div>
+                            <div class="text-[10px] text-slate-500 mt-0.5">${arc.timestamp} • Ikan ${arc.fish}</div>
+                        </div>
+                        <button onclick="deleteArchive(${arc.id})" class="text-slate-600 hover:text-red-400 transition">
+                            <i class="fas fa-trash-alt text-xs"></i>
+                        </button>
+                    </div>
+                    <button onclick="loadArchive(${arc.id})" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-blue-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition">
+                        Buka Arsip
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function loadArchive(id) {
+            const arc = archives.find(a => a.id === id);
+            if (arc && confirm(`Muat arsip "${arc.name}"? Data saat ini akan diganti.`)) {
+                activeFish = arc.fish;
+                appData[activeFish] = JSON.parse(JSON.stringify(arc.data));
+                saveToLocalStorage();
                 switchFish(activeFish);
             }
         }
 
+        function deleteArchive(id) {
+            if (confirm('Hapus arsip ini selamanya?')) {
+                archives = archives.filter(a => a.id !== id);
+                localStorage.setItem('fishRABArchives', JSON.stringify(archives));
+                renderArchives();
+            }
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem('fishRABData', JSON.stringify(appData));
+        }
+
+        function resetData() {
+            if(confirm('Reset semua data budidaya ini ke awal? Semua tambahan baris akan hilang.')) {
+                appData[activeFish] = JSON.parse(JSON.stringify(INITIAL_STATE[activeFish]));
+                saveToLocalStorage();
+                switchFish(activeFish);
+            }
+        }
+
+        // --- Event Listeners ---
         document.getElementById('range-sr').addEventListener('input', updateStats);
         document.getElementById('input-harga-jual').addEventListener('input', () => {
             updateStats();
-            localStorage.setItem('fishRABData', JSON.stringify(appData));
+            saveToLocalStorage();
         });
 
         window.onload = () => {
             showLogo(localStorage.getItem('userLogo'));
+            renderArchives();
             switchFish(activeFish);
         };
     </script>
